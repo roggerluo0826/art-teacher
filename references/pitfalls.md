@@ -129,6 +129,33 @@ to.textOut(s); c.drawText(to)
 
 ## 驗證
 
+### reportlab 會依「影像內容」去重(做對照測試時會被坑)
+
+**症狀**:想做 A/B 對照(例如同一個顏色分別用 Flate 和 JPEG 嵌入),結果 PDF 裡的影像數比預期少,兩列長得一模一樣——**因為它們根本是同一個物件**,對照測試等於沒做。
+
+**原因**:reportlab 的 `ImageReader` 用**影像內容的雜湊**當識別。就算你給的是兩個不同檔名、不同格式(a.tif / a.jpg),只要解碼後的像素完全相同,就會被合併成同一個 XObject。
+
+**對策**:
+1. 做對照測試時,**驗證 PDF 裡的影像物件數等於你預期的列數**(`page.get_images()`)。
+2. 用**真實圖片**而非純色色塊。純色的 JPEG 和 Flate 解碼後完全相同,必然被去重——而且純色本來就測不出 JPEG 的差異(JPEG 雜訊只出現在邊緣)。
+
+順帶:這個去重在正常使用時是**優點**——`impose.py` 就是靠它讓 150 張券只嵌一次底圖。
+
+### 模組層級包 sys.stdout 會炸掉 import 它的人
+
+```python
+# 錯:在模組層級直接做
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+```
+
+別的腳本 `import` 這個模組時,若對方也包過 stdout,舊的 wrapper 被 GC 時會**關掉底層 buffer**,對方後續的 `print()` 就噴 `ValueError: I/O operation on closed file`。
+
+```python
+# 對
+if __name__ == '__main__':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+```
+
 ### 從 PDF 抽編號抽到 0 個
 
 **症狀**:PDF 畫面上明明看得到 `HMS001`,`page.get_text('words')` 找 `HMS\d{3}` 卻抓到 **0** 個,以為編號根本沒畫上去。

@@ -21,7 +21,10 @@
 """
 import sys, io, json, argparse, os
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+# 只在直接執行時包裝 stdout。若在 import 時做,被其他腳本 import 會把
+# 對方已包好的 stdout 底層關掉 -> ValueError: I/O operation on closed file
+if __name__ == '__main__':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 from PIL import Image, ImageCms
 import numpy as np
