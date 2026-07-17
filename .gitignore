@@ -9,3 +9,6 @@ font.json
 overlay.png
 proof_*.png
 *.pdf
+
+# ICC profile 由 extract_icc.py 從來源 PDF 取出,不進版控(檔案大且有授權問題)
+profiles/*.icc

@@ -121,14 +121,29 @@ py scripts/verify_pdf.py out.pdf --prefix HMS --digits 3 --start 1 --count 150 \
 
 常用 profile(Windows 內建,`C:\Windows\System32\spool\drivers\color\`):
 
-- `JapanColor2001Coated.icc` — 台灣/日本塗佈紙,最常用的預設
-- `USWebCoatedSWOP.icc` — 美規,實測紅色掉最少(ΔE 8.2)
+- `JapanColor2001Coated.icc` — 台灣/日本塗佈紙
+- `USWebCoatedSWOP.icc` — 美規
 - `CoatedFOGRA39.icc` — 歐規
 - `JapanColor2001Uncoated.icc` — 非塗佈紙(道林紙等)
 
-**送印刷廠前一定要問對方要哪個 profile**,不要自己猜。
+**送印刷廠前一定要問對方要哪個 profile**,不要自己猜。**profile 選錯的影響遠大於方法本身**(實測:同一支程式換 profile,綠色的分色差 Σ49)。
 
-技術細節見 `references/imposition.md`。
+### 如果素材來自 Canva
+
+Canva Pro 的「PDF 列印 + CMYK」用的是 **GRACoL 2013 CRPC6 + Perceptual**,而且**把 ICC 完整嵌在 PDF 裡**。所以:
+
+```
+py scripts/extract_icc.py <Canva匯出的CMYK.pdf>     # 挖出那個 profile
+py scripts/impose.py ... --cmyk profiles/GRACoL2013_CRPC6.icc
+```
+
+這樣分色會跟 Canva **完全一致**(實測色值差 0)。比自己猜 profile 可靠得多。
+
+注意 Canva 的 CMYK PDF **不能直接拿來當成品**:它把整頁壓平成一張有損 JPEG、字型 0 個(全點陣化),而且編號當然還是原本那組(全部一樣)。它的價值在於**告訴你該用哪個 profile**。
+
+`--cmyk` 會自動把 ICC 嵌成 OutputIntent。沒有 OutputIntent 的 DeviceCMYK PDF 等於一堆沒有單位的數字,印表機只能猜。代價是檔案 +3MB 左右,值得。
+
+技術細節與 Canva PDF 的完整逆向分析見 `references/imposition.md`。
 
 ## 回報給使用者時要講的
 

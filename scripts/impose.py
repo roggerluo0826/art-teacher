@@ -53,6 +53,35 @@ def rgb_to_cmyk_color(rgb, icc, intent=None):
     return tuple(v / 255.0 for v in c.getpixel((0, 0)))
 
 
+def add_output_intent(pdf_path, icc_path):
+    """把 ICC 以 OutputIntent 寫進 PDF。
+
+    沒有 OutputIntent 的 DeviceCMYK PDF 等於「一堆沒有單位的數字」——
+    印表機/RIP 只能自己猜是哪個 CMYK 空間,顏色就飄了。印刷廠也會退件。
+    """
+    import fitz
+    icc = open(icc_path, 'rb').read()
+    desc = os.path.splitext(os.path.basename(icc_path))[0]
+    doc = fitz.open(pdf_path)
+
+    x_icc = doc.get_new_xref()
+    doc.update_object(x_icc, '<< /N 4 >>')
+    doc.update_stream(x_icc, icc, compress=True)
+
+    x_oi = doc.get_new_xref()
+    doc.update_object(x_oi, '<< /Type /OutputIntent /S /GTS_PDFX '
+                            '/OutputConditionIdentifier (%s) /OutputCondition (%s) '
+                            '/Info (%s) /RegistryName (http://www.color.org) '
+                            '/DestOutputProfile %d 0 R >>' % (desc, desc, desc, x_icc))
+    doc.xref_set_key(doc.pdf_catalog(), 'OutputIntents', '[ %d 0 R ]' % x_oi)
+
+    tmp = pdf_path + '.tmp'
+    doc.save(tmp, garbage=0, deflate=True)
+    doc.close()
+    os.replace(tmp, pdf_path)
+    return desc
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('inspect_json')
@@ -68,6 +97,8 @@ def main():
     ap.add_argument('--coupon-height', type=float, default=None, help='直接指定券高 mm')
     ap.add_argument('--coupon-width', type=float, default=None, help='直接指定券寬 mm')
     ap.add_argument('--cmyk', default=None, help='CMYK ICC 描述檔路徑;不給則維持 RGB')
+    ap.add_argument('--no-output-intent', action='store_true',
+                    help='不要把 ICC 嵌成 OutputIntent(檔案會小很多,但送印刷廠會被退)')
     ap.add_argument('--out', required=True)
     ap.add_argument('--no-cropmarks', action='store_true')
     ap.add_argument('--title', default=None)
@@ -218,6 +249,14 @@ def main():
     if len(codes) % per:
         print('  末頁只有 %d 張 (%d 不是 %d 的倍數)' % (len(codes) % per, args.count, per))
     print('編號    : %s ~ %s' % (codes[0], codes[-1]))
+    if args.cmyk and not args.no_output_intent:
+        sz = os.path.getsize(args.out)
+        desc = add_output_intent(args.out, args.cmyk)
+        print('OutputIntent: 已嵌入 %s  (%.2f -> %.2f MB)'
+              % (desc, sz / 1e6, os.path.getsize(args.out) / 1e6))
+    elif args.cmyk:
+        print('OutputIntent: 未嵌入 (--no-output-intent) !! 送印刷廠可能被退件')
+
     print('檔案    : %s  (%.2f MB)' % (args.out, os.path.getsize(args.out) / 1e6))
     print('\n下一步: py scripts/verify_pdf.py %s --prefix %s --digits %d --start %d --count %d'
           % (args.out, args.prefix, args.digits, args.start, args.count))
