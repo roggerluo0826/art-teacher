@@ -72,6 +72,19 @@ py scripts/impose.py inspect.json font.json --prefix HMS --digits 3 --start 1 --
 - 底圖只嵌入 PDF **一次**(同一個 `ImageReader` 重複引用),編號用**向量文字**畫。150 張券因此只有 0.2MB 而非數百 MB,且編號放到多大都銳利。
 - 腳本會回報**有效 DPI**,低於 300 要告訴使用者原圖解析度不足。
 
+**尺寸**(三選一,另一邊一律由原圖比例算出):
+
+| 參數 | 意思 |
+|---|---|
+| `--margin 8` | 由左右邊界反推券寬(預設) |
+| `--coupon-height 45` | 直接指定券高 mm |
+| `--coupon-width 96` | 直接指定券寬 mm |
+
+使用者說「券再大一點、高度從 4cm 變 4.5cm」→ 用 `--coupon-height 45`,不要自己去湊 margin。
+
+**色彩**:預設 `DeviceRGB`。加 `--cmyk <profile.icc>` 產生 `DeviceCMYK` 版。
+**但先讀下面這段再決定**,不要使用者一說「要 CMYK」就照做。
+
 ### 第 4 步:驗證(不可略過)
 
 ```
@@ -83,6 +96,39 @@ py scripts/verify_pdf.py out.pdf --prefix HMS --digits 3 --start 1 --count 150 \
 
 **然後一定要用 Read 打開 `proof_first.png` 和 `proof_last.png` 親眼看過。**
 腳本說通過 ≠ 印出來是對的。數字對、位置錯,驗證腳本抓不到。
+
+## 使用者說「印出來顏色不對,要用 CMYK」時
+
+**先問印去哪裡,不要直接轉。** CMYK 不是「比較準」的意思:
+
+| 印去哪 | 該給什麼 | 為什麼 |
+|---|---|---|
+| 家用/辦公室印表機 | **RGB** | 印表機驅動期待 RGB 並自己做轉換。你先轉成 CMYK,驅動會再轉一次,通常更不準。 |
+| 印刷廠(平版/數位輸出) | **CMYK** + 對方指定的 ICC | 印刷廠會要求,而且他們的機器就是 CMYK 四色。 |
+
+而且**轉 CMYK 一定會掉色**,這是物理限制不是 bug:螢幕的鮮豔色(尤其純紅、亮橘、螢光綠)在 CMYK 油墨色域外,一定被壓縮。實測(Japan Color 2001 Coated):
+
+| 顏色 | 轉換後 | ΔE |
+|---|---|---|
+| `#FF3131` 鮮紅 | `#E83735` | **11.3 明顯變沉** |
+| `#9FD8F5` 天空藍 | `#9FD1EC` | 3.0 輕微 |
+| `#87A84F` 山丘綠 | `#85A34E` | 3.0 輕微 |
+| `#FFF8E7` 米白 | `#FFF6E5` | 1.1 幾乎無感 |
+
+ΔE < 2 幾乎看不出來、2–5 看得出來、> 5 明顯。**飽和的紅永遠是掉最多的那個。**
+
+所以正確的回應是:**兩個版本都給,講清楚差別,讓使用者按用途選**。並且告訴他「顏色會變沉不是檔案做壞了,是 CMYK 印不出那個紅」。
+
+常用 profile(Windows 內建,`C:\Windows\System32\spool\drivers\color\`):
+
+- `JapanColor2001Coated.icc` — 台灣/日本塗佈紙,最常用的預設
+- `USWebCoatedSWOP.icc` — 美規,實測紅色掉最少(ΔE 8.2)
+- `CoatedFOGRA39.icc` — 歐規
+- `JapanColor2001Uncoated.icc` — 非塗佈紙(道林紙等)
+
+**送印刷廠前一定要問對方要哪個 profile**,不要自己猜。
+
+技術細節見 `references/imposition.md`。
 
 ## 回報給使用者時要講的
 

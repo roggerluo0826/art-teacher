@@ -78,6 +78,51 @@ HMS  p.1/13   HMS001 - HMS012   (12)
 
 不想要的話直接改 `impose.py` 裡那段 `drawString`。
 
+## CMYK
+
+### reportlab 怎麼嵌 CMYK
+
+實測結果(重要,因為 reportlab 文件沒講清楚):
+
+| 餵給 `ImageReader` | PDF 內的色彩空間 | 編碼 |
+|---|---|---|
+| RGB PNG | `DeviceRGB` | Flate(無損) |
+| **CMYK TIFF** | **`DeviceCMYK`** | **Flate(無損)** ← 用這個 |
+| CMYK JPEG | `DeviceCMYK` | DCTDecode(**有損**) |
+
+**用 CMYK TIFF。** JPEG 雖然也能得到 DeviceCMYK,但券這種大色塊平面設計,JPEG 會在色塊交界處產生 ringing 雜訊。TIFF 讓 reportlab 以 Flate 無損重新編碼,檔案也沒大多少(0.22 → 0.23 MB)。
+
+驗證方式:PyMuPDF `doc.extract_image(xref)['colorspace']`,`4` 就是 CMYK、`3` 是 RGB。
+
+### 轉換要走 ICC,不要用 PIL 的 `convert('CMYK')`
+
+`img.convert('CMYK')` 是**naive 公式轉換**(`C = 255 - R` 之類),完全沒有色彩管理,印出來會差很多。
+
+正確做法是 `ImageCms` 走 ICC:
+
+```python
+tr = ImageCms.buildTransformFromOpenProfiles(
+    ImageCms.getOpenProfile(SRGB_ICC),
+    ImageCms.getOpenProfile(CMYK_ICC),
+    'RGB', 'CMYK', renderingIntent=ImageCms.Intent.PERCEPTUAL)
+cmyk = ImageCms.applyTransform(rgb_img, tr)
+```
+
+Rendering intent 用 `PERCEPTUAL`(整體壓縮、保持色彩關係),適合這種插畫。
+`RELATIVE_COLORIMETRIC` 會把色域外的色硬夾到邊界,飽和色會糊成一團。
+
+### 編號色要走同一條路
+
+編號是向量文字,顏色要用 `setFillColorCMYK`。**那個 CMYK 值必須用跟底圖同一個 ICC transform 算出來**,否則編號的紅和底圖的紅會是兩種紅。
+
+`impose.py` 的 `rgb_to_cmyk_color()` 就是造一個 1×1 的 RGB 圖走同一條 transform,取出 CMYK 值。
+
+### CMYK 檔裡不要混 RGB
+
+裁切線、頁尾標示也要用 `setStrokeColorCMYK` / `setFillColorCMYK`。混用 RGB 色的 PDF 送印刷廠會被退件或被對方自行轉換(結果不可控)。
+
+裁切線用 `(0,0,0,1)` 純黑版(K100),不要用四色黑。
+
 ## 為什麼底圖只嵌一次很重要
 
 `impose.py` 建立**一個** `ImageReader` 物件,150 次 `drawImage` 都傳同一個,reportlab 因此只嵌入一個 XObject。

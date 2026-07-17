@@ -7,6 +7,15 @@
   py scripts/impose.py inspect.json font.json --prefix HMS --digits 3 \
      --start 1 --count 150 --cols 2 --rows 6 --out out.pdf [--margin 8] [--page A4]
 
+尺寸(三選一,都保持原圖長寬比):
+  --margin 8            由左右邊界反推券寬(預設)
+  --coupon-height 45    直接指定券高 mm,寬由比例算出
+  --coupon-width 96     直接指定券寬 mm,高由比例算出
+
+色彩:
+  --cmyk <profile.icc>  用 ICC 把底圖與編號色轉成 DeviceCMYK(送印刷廠用)
+                        不給則維持 DeviceRGB(桌上型印表機通常這樣比較準)
+
 關鍵:底圖只嵌入 PDF 一次(同一個 ImageReader 重複引用),編號是向量文字。
 150 張券的檔案因此只有 0.2MB 而非數百 MB,且編號放到多大都銳利。
 """
@@ -14,7 +23,7 @@ import sys, io, json, argparse, os
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
-from PIL import Image
+from PIL import Image, ImageCms
 import numpy as np
 from reportlab.pdfgen import canvas as rl_canvas
 from reportlab.lib import pagesizes
@@ -22,6 +31,26 @@ from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+
+SRGB_ICC = os.path.join(os.environ.get('WINDIR', r'C:\Windows'),
+                        r'System32\spool\drivers\color\sRGB Color Space Profile.icm')
+
+
+def to_cmyk(img, icc, intent=None):
+    """用 ICC 把 RGB 影像轉成 CMYK。回傳 (CMYK影像, transform)"""
+    if intent is None:
+        intent = ImageCms.Intent.PERCEPTUAL
+    tr = ImageCms.buildTransformFromOpenProfiles(
+        ImageCms.getOpenProfile(SRGB_ICC), ImageCms.getOpenProfile(icc),
+        'RGB', 'CMYK', renderingIntent=intent)
+    return ImageCms.applyTransform(img, tr), tr
+
+
+def rgb_to_cmyk_color(rgb, icc, intent=None):
+    """單一顏色走同一條 ICC 路徑,確保編號色與底圖同調"""
+    one = Image.new('RGB', (1, 1), tuple(rgb))
+    c, _ = to_cmyk(one, icc, intent)
+    return tuple(v / 255.0 for v in c.getpixel((0, 0)))
 
 
 def main():
@@ -35,11 +64,17 @@ def main():
     ap.add_argument('--cols', type=int, required=True)
     ap.add_argument('--rows', type=int, required=True)
     ap.add_argument('--page', default='A4')
-    ap.add_argument('--margin', type=float, default=8, help='左右邊界 mm')
+    ap.add_argument('--margin', type=float, default=8, help='左右邊界 mm(未指定券尺寸時用)')
+    ap.add_argument('--coupon-height', type=float, default=None, help='直接指定券高 mm')
+    ap.add_argument('--coupon-width', type=float, default=None, help='直接指定券寬 mm')
+    ap.add_argument('--cmyk', default=None, help='CMYK ICC 描述檔路徑;不給則維持 RGB')
     ap.add_argument('--out', required=True)
     ap.add_argument('--no-cropmarks', action='store_true')
     ap.add_argument('--title', default=None)
     args = ap.parse_args()
+
+    if args.coupon_height and args.coupon_width:
+        raise SystemExit('--coupon-height 與 --coupon-width 只能擇一(另一邊由原圖比例決定)')
 
     ins = json.load(open(args.inspect_json, encoding='utf-8'))
     fj = json.load(open(args.font_json, encoding='utf-8'))
@@ -56,27 +91,53 @@ def main():
     clean = im.copy()
     clean.paste(fill, (bx0, by0, bx1, by1))
 
-    base = os.path.splitext(args.out)[0] + '_base.png'
-    clean.save(base)
-
-    # 驗證真的清乾淨
+    # 驗證真的清乾淨(在轉色前先驗,RGB 比對才準)
     ca = np.asarray(clean).astype(int)
     rgb = np.array(ins['code_color'])
     X0, Y0, X1, Y1 = ins['code_bbox']
     left = int((np.abs(ca[Y0:Y1 + 1, X0:X1 + 1] - rgb).sum(axis=2) <= 90).sum())
     print('舊編號殘留像素: %d  (應為 0)' % left)
     assert left == 0, '舊編號沒清乾淨'
+
+    # ---------- 1b. 色彩 ----------
+    R, G, B = [v / 255.0 for v in ins['code_color']]
+    code_cmyk = None
+    if args.cmyk:
+        if not os.path.exists(args.cmyk):
+            raise SystemExit('找不到 ICC 描述檔: %s' % args.cmyk)
+        clean, _ = to_cmyk(clean, args.cmyk)
+        code_cmyk = rgb_to_cmyk_color(ins['code_color'], args.cmyk)
+        # 存 TIFF:reportlab 會以無損 Flate 嵌成 DeviceCMYK
+        # (存 JPEG 也是 DeviceCMYK,但大色塊平面設計會出現壓縮雜訊)
+        base = os.path.splitext(args.out)[0] + '_base.tif'
+        clean.save(base, 'TIFF')
+        print('色彩    : DeviceCMYK  <- %s' % os.path.basename(args.cmyk))
+        print('  編號色 #%02X%02X%02X -> C%.0f%% M%.0f%% Y%.0f%% K%.0f%%'
+              % (*ins['code_color'], *[v * 100 for v in code_cmyk]))
+    else:
+        base = os.path.splitext(args.out)[0] + '_base.png'
+        clean.save(base)
+        print('色彩    : DeviceRGB')
     print('乾淨底圖: %s' % base)
 
     # ---------- 2. 版面 ----------
     PW, PH = getattr(pagesizes, args.page.upper())
-    MX = args.margin * mm
-    cw = (PW - 2 * MX) / args.cols
-    ch = cw * IH / IW                       # 保持原圖比例,絕不變形
+    if args.coupon_height:                  # 指定高 -> 寬由比例算
+        ch = args.coupon_height * mm
+        cw = ch * IW / IH
+    elif args.coupon_width:                 # 指定寬 -> 高由比例算
+        cw = args.coupon_width * mm
+        ch = cw * IH / IW
+    else:                                   # 由邊界反推
+        cw = (PW - 2 * args.margin * mm) / args.cols
+        ch = cw * IH / IW                   # 保持原圖比例,絕不變形
     bw, bh = cw * args.cols, ch * args.rows
+    if bw > PW:
+        raise SystemExit('%d 欄放不下:所需 %.1fmm > 頁寬 %.1fmm' % (args.cols, bw / mm, PW / mm))
     if bh > PH:
-        raise SystemExit('%d 列放不下:所需 %.1fmm > 頁高 %.1fmm。減少 --rows 或 --margin'
+        raise SystemExit('%d 列放不下:所需 %.1fmm > 頁高 %.1fmm。減少 --rows 或券尺寸'
                          % (args.rows, bh / mm, PH / mm))
+    MX = (PW - bw) / 2                      # 水平置中
     my = (PH - bh) / 2
     s = cw / IW                             # 影像 px -> pt
 
@@ -92,8 +153,7 @@ def main():
     pdfmetrics.registerFont(TTFont('CodeFont', fj['path']))
     fsize = fj['size'] * s
     cspace = fj['spacing'] * s
-    print('編號    : %.2f pt ; 字距 %.2f pt ; #%02X%02X%02X'
-          % (fsize, cspace, *ins['code_color']))
+    print('編號    : %.2f pt ; 字距 %.2f pt' % (fsize, cspace))
 
     # ---------- 3. 產生 ----------
     per = args.cols * args.rows
@@ -104,7 +164,6 @@ def main():
     img = ImageReader(base)                 # 同一物件 -> 只嵌入一次
     c = rl_canvas.Canvas(args.out, pagesize=(PW, PH))
     c.setTitle(args.title or ('%s%0*d-%s' % (args.prefix, args.digits, args.start, codes[-1])))
-    R, G, B = [v / 255.0 for v in ins['code_color']]
     placed = []
 
     for pno, chunk in enumerate(pages):
@@ -117,13 +176,21 @@ def main():
                              Y + ch - ins['baseline'] * s)
             to.setFont('CodeFont', fsize)
             to.setCharSpace(cspace)          # 注意:setCharSpace 在 text object,不在 canvas
-            to.setFillColorRGB(R, G, B)
+            if code_cmyk:
+                to.setFillColorCMYK(*code_cmyk)
+            else:
+                to.setFillColorRGB(R, G, B)
             to.textOut(code)
             c.drawText(to)
             placed.append((pno + 1, code))
 
         if not args.no_cropmarks:
-            c.setStrokeColorRGB(0, 0, 0); c.setLineWidth(0.25)
+            # CMYK 檔裡不要混用 RGB 色,裁切線用純黑版
+            if code_cmyk:
+                c.setStrokeColorCMYK(0, 0, 0, 1)
+            else:
+                c.setStrokeColorRGB(0, 0, 0)
+            c.setLineWidth(0.25)
             nrow = (len(chunk) + args.cols - 1) // args.cols
             top, bot = PH - my, PH - my - nrow * ch
             for i in range(args.cols + 1):
@@ -135,7 +202,11 @@ def main():
                 c.line(MX - 1 * mm, y, MX - 1 * mm - 4 * mm, y)
                 c.line(MX + bw + 1 * mm, y, MX + bw + 1 * mm + 4 * mm, y)
 
-        c.setFont('Helvetica', 6); c.setFillColorRGB(.55, .55, .55)
+        c.setFont('Helvetica', 6)
+        if code_cmyk:
+            c.setFillColorCMYK(0, 0, 0, .45)
+        else:
+            c.setFillColorRGB(.55, .55, .55)
         c.drawString(MX, my / 2, '%s  p.%d/%d   %s - %s   (%d)'
                      % (args.prefix, pno + 1, len(pages), chunk[0], chunk[-1], len(chunk)))
         c.showPage()

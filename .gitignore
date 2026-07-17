@@ -5,6 +5,7 @@ __pycache__/
 inspect.json
 font.json
 *_base.png
+*_base.tif
 overlay.png
 proof_*.png
 *.pdf
