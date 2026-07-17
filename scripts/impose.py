@@ -53,11 +53,15 @@ def rgb_to_cmyk_color(rgb, icc, intent=None):
     return tuple(v / 255.0 for v in c.getpixel((0, 0)))
 
 
-def add_output_intent(pdf_path, icc_path):
-    """把 ICC 以 OutputIntent 寫進 PDF。
+def add_output_intent(pdf_path, icc_path, version='1.7'):
+    """把 ICC 以 OutputIntent 寫進 PDF,並把 PDF 版本提升到 1.7。
 
     沒有 OutputIntent 的 DeviceCMYK PDF 等於「一堆沒有單位的數字」——
     印表機/RIP 只能自己猜是哪個 CMYK 空間,顏色就飄了。印刷廠也會退件。
+
+    版本一定要提升(實際踩過):OutputIntent 是 PDF 1.4 / PDF-X 才引入的。
+    reportlab 預設輸出 %PDF-1.3,檔頭宣告 1.3 卻塞 1.4 的東西 ->
+    嚴格的 RIP 可以合法地整個忽略 OutputIntent,等於白加。
     """
     import fitz
     icc = open(icc_path, 'rb').read()
@@ -73,12 +77,22 @@ def add_output_intent(pdf_path, icc_path):
                             '/OutputConditionIdentifier (%s) /OutputCondition (%s) '
                             '/Info (%s) /RegistryName (http://www.color.org) '
                             '/DestOutputProfile %d 0 R >>' % (desc, desc, desc, x_icc))
-    doc.xref_set_key(doc.pdf_catalog(), 'OutputIntents', '[ %d 0 R ]' % x_oi)
+    cat = doc.pdf_catalog()
+    doc.xref_set_key(cat, 'OutputIntents', '[ %d 0 R ]' % x_oi)
+    doc.xref_set_key(cat, 'Version', '/%s' % version)     # Catalog 覆寫(PDF 1.4+)
 
     tmp = pdf_path + '.tmp'
     doc.save(tmp, garbage=0, deflate=True)
     doc.close()
-    os.replace(tmp, pdf_path)
+
+    # 檔頭也要改,只靠 Catalog /Version 有些 RIP 不看
+    with open(tmp, 'rb') as f:
+        data = f.read()
+    if data[:8].startswith(b'%PDF-1.'):
+        data = b'%PDF-' + version.encode() + data[8:]
+    with open(pdf_path, 'wb') as f:
+        f.write(data)
+    os.remove(tmp)
     return desc
 
 

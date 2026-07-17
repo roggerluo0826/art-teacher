@@ -149,6 +149,27 @@ t = ''.join(sp['text'] for sp in line['spans']).replace(' ', '')
 
 **對策**:用字型過濾——編號用 `CodeFont`(Arial-BoldMT),頁尾用 Helvetica。`verify_pdf.py` 先找出最常出現的編號字型,再只認那個字型的行。
 
+### PDF 1.3 + OutputIntent = 白加(實際踩過,而且很難查)
+
+**症狀**:CMYK 分色的色值跟參考檔**一模一樣**(比對到 0 差)、渲染出來的平均 RGB 只差 1、OutputIntent 也確認嵌進去了——**但印出來就是比較淡、還帶顆粒感**。
+
+**原因**:reportlab 預設輸出 **`%PDF-1.3`**。而 **OutputIntent 是 PDF 1.4 / PDF-X 才引入的規格**。檔頭宣告 1.3 卻塞了一個 1.4 才有的物件,嚴格的 RIP / 印表機驅動**可以合法地整個忽略它**。一旦被忽略,DeviceCMYK 又變回「沒有單位的數字」,印表機套用自己的預設 → 顏色飄。
+
+**等於你加了 OutputIntent 但它從來沒生效過。**
+
+**對策**:嵌 OutputIntent 時一定要把版本一起提升,而且**檔頭和 Catalog 都要改**(有些 RIP 只看檔頭,有些看 Catalog):
+
+```python
+doc.xref_set_key(doc.pdf_catalog(), 'Version', '/1.7')   # Catalog 覆寫
+...
+data = open(tmp,'rb').read()
+data = b'%PDF-1.7' + data[8:]                            # 檔頭
+```
+
+`impose.py` 的 `add_output_intent()` 已經兩個都做。驗證:`open(pdf,'rb').read(8)` 要是 `%PDF-1.7`。
+
+**這條的教訓**:色彩對不上時,不要只查色彩管線。**先確認你設的東西真的有生效**——規格版本、旗標、宣告,任何一個不相容都會讓設定被靜默忽略,而且不會有任何錯誤訊息。
+
 ### 「腳本沒報錯」不等於「印出來對」
 
 驗證腳本只能證明**編號的文字內容和座標**對。它證明不了:
