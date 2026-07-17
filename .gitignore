@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+
+# 執行產物
+inspect.json
+font.json
+*_base.png
+overlay.png
+proof_*.png
+*.pdf
