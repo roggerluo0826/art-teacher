@@ -17,15 +17,19 @@ Claude Code / Claude Agent Skill — 把一張已定稿的券圖,變成一疊編
 
 ## 成果
 
-實際案例(哈瑪星商圈券 150 張):
+實際案例(哈瑪星商圈券 150 張,雙面,已實際印出驗證):
 
 | 項目 | 結果 |
 |---|---|
-| 頁數 | 13 頁(前 12 頁滿版 + 末頁 6 張) |
+| 頁數 | 單面 13 頁 / 雙面 26 頁(F1,B1,F2,B2…) |
 | 編號 | HMS001–HMS150,無重複、無缺漏、順序正確 |
-| 檔案大小 | **0.22 MB**(底圖只嵌入一次,編號為向量文字) |
-| 有效解析度 | 528 DPI |
-| 字體比對 | Arial Bold,IoU 0.72(原字體不在本機) |
+| 檔案大小 | **0.22 MB** 單面 / 0.50 MB 雙面(底圖只嵌一次,編號為向量文字) |
+| 有效解析度 | 534 DPI(正面)/ 583 DPI(背面) |
+| 字體比對 | Arial Bold,IoU 0.79(原字體不在本機) |
+| 正背對齊 | 13 張紙逐格吻合,含不滿版的最後一張(6/6) |
+
+**實際印出來正確的設定**(見 `references/printing.md` 開頭的完整配方):
+驅動 PDL 用 **KPDL(PostScript)**、送 **RGB 版**、**實際大小**、**雙面+長邊翻頁**。
 
 ## 用法
 
@@ -45,6 +49,9 @@ py scripts/impose.py inspect.json font.json --prefix HMS --digits 3 --start 1 --
 # 4. 驗證:從 PDF 把編號抽回來比對(必須 exit 0),並輸出預覽圖親眼看
 py scripts/verify_pdf.py out.pdf --prefix HMS --digits 3 --start 1 --count 150 \
    --cols 2 --rows 6 --proof proof
+
+# 5.(要印背面才需要)交錯成 F1,B1,F2,B2... 給印表機雙面列印
+py scripts/duplex.py out.pdf 背面.png --out duplex.pdf --flip long
 ```
 
 > **用 `py` 不要用 `python`。** PATH 上的 `python` 多半是 Microsoft Store 的 stub,
