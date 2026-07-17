@@ -50,6 +50,19 @@ py scripts/verify_pdf.py out.pdf --prefix HMS --digits 3 --start 1 --count 150 \
 > **用 `py` 不要用 `python`。** PATH 上的 `python` 多半是 Microsoft Store 的 stub,
 > 沒有輸出、回 exit 9009/49,會讓你以為程式壞了。
 
+## 印出來顏色不對?先看 `references/printing.md`
+
+**不要先動檔案。** 真實案例:為了「印出來比較淡」,依序換 ICC profile、補 OutputIntent、
+升 PDF 版本、換影像編碼、換解析度,甚至直接拿參考檔的 CMYK 像素當底圖——
+**CMYK 色值比對到 0 差,實際列印毫無改變**。
+
+真因是印表機驅動走 **PCL XL**,而 PCL XL 是 **RGB only、沒有 ICC 色彩管理**——
+所有 CMYK 資料在送到印表機前就被丟掉了。把 PDL 改成 **KPDL(PostScript)** 後立刻正常。
+
+**先做這兩件事(五分鐘):**
+1. 同一份檔案拿到**另一台電腦**印。不一樣 → 檔案沒問題,是電腦。
+2. 查驅動的 **PDL**:列印對話框 → 進階 → 有沒有「PostScript 選項」區塊。
+
 ## 設計上的堅持
 
 - **絕不變形**:券高一律由原圖長寬比算出,寧可留白。
@@ -71,12 +84,15 @@ pip install pillow numpy reportlab pymupdf
 
 ```
 SKILL.md                    技能本體(給 Claude 讀)
+references/printing.md      印出來顏色不對時的排查流程(PDL / 驅動 / 縮放)
 references/pitfalls.md      踩過的坑與對策(每一條都出過包)
-references/imposition.md    拼版數學、出血裁切、印刷規格
+references/imposition.md    拼版數學、出血裁切、CMYK、印刷規格
 scripts/inspect_art.py      第1步 讀圖
 scripts/match_font.py       第2步 配字體
 scripts/impose.py           第3步 拼版
 scripts/verify_pdf.py       第4步 驗證
+scripts/extract_icc.py      從既有 PDF 挖出它用的 ICC profile
+scripts/color_probe.py      色彩管線診斷頁(一次印一張定位問題)
 ```
 
 ## 安裝成 Claude Code skill
