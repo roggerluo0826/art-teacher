@@ -91,6 +91,7 @@ scripts/inspect_art.py      第1步 讀圖
 scripts/match_font.py       第2步 配字體
 scripts/impose.py           第3步 拼版
 scripts/verify_pdf.py       第4步 驗證
+scripts/duplex.py           雙面:把背面圖交錯進正面 PDF(F1,B1,F2,B2…)
 scripts/extract_icc.py      從既有 PDF 挖出它用的 ICC profile
 scripts/color_probe.py      色彩管線診斷頁(一次印一張定位問題)
 ```
